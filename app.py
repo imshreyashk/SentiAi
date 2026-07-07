@@ -4,6 +4,8 @@ import json
 import urllib.request
 import urllib.parse
 import ssl
+
+# Check that the import succeeds
 from stadium_engine import StadiumOperationsEngine, TelemetryPayload
 
 # Set official accessible browser parameters
@@ -183,13 +185,14 @@ def render_fixtures_grid(fixtures_list):
         score = engine.evaluate_threat_score(payload)
         city_name = city_mapping.get(f["stadium"], "New York")
         weather_str = get_live_weather(city_name)
+        pct = f["current_occupancy"] / f["max_capacity"]
         
         # Clickable expander for each individual match incident wrapping the split grid
         with st.expander(f"🏟️ {f['match_name']} ({f['stage']}) — Threat Score: {score:.1f}/100.0"):
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("### 📊 Telemetry Metrics")
+                st.markdown("### 📊 Incoming Telemetry")
                 
                 # High-contrast WCAG safety alert boxes
                 if score >= 70.0:
@@ -199,34 +202,47 @@ def render_fixtures_grid(fixtures_list):
                 else:
                     st.success(f"✅ SYSTEM OPERATING WITHIN NORMAL PARAMETERS")
                 
+                # Prominent side-by-side metric cards
+                m_col1, m_col2 = st.columns(2)
+                m_col1.metric("Calculated Threat Score", f"{score:.2f} / 100.0")
+                m_col2.metric("Turnstile Saturation Pct", f"{pct:.1%}")
+                
                 st.write(f"**📍 Stadium Venue:** {f['stadium']}")
                 st.write(f"**🆔 Access Point ID:** {f['gate_id']}")
                 st.write(f"**🌡️ Live Weather:** {weather_str}")
                 st.write(f"**🚗 Transit Status:** {f['transit_status'].upper()}")
                 st.write(f"**👥 Supporter Mood:** {f['crowd_temperament'].upper()}")
-                st.write(f"**🔢 Calculated Threat Score:** `{score:.2f} / 100.0`")
                 
-                pct = f["current_occupancy"] / f["max_capacity"]
                 st.progress(
                     value=min(pct, 1.0), 
                     text=f"Turnstile Load Index: {pct:.1%} ({f['current_occupancy']} / {f['max_capacity']} Fans)"
                 )
                 
-                # Render 5 mandatory detail insights as bullet points inside column 1
+                # Render 5 mandatory detail insights inside a clean high-contrast blockquote container
                 st.markdown("#### 📖 Operational Insights")
-                st.write(f"- **Match Flow:** {f['match_flow']}")
-                st.write(f"- **Performance Analytics:** {f['performance_analytics']}")
-                st.write(f"- **Tactical Conclusion:** {f['tactical_conclusion']}")
-                st.write(f"- **Stadium Infrastructure:** {f['stadium_infrastructure']}")
-                st.write(f"- **Fan Crowd Dynamics:** {f['fan_crowd_dynamics']}")
+                st.markdown(f"""
+                > **🔄 Match Flow:** {f['match_flow']}
+                >
+                > **📊 Performance Analytics:** {f['performance_analytics']}
+                >
+                > **🎯 Tactical Conclusion:** {f['tactical_conclusion']}
+                >
+                > **🏗️ Stadium Infrastructure:** {f['stadium_infrastructure']}
+                >
+                > **👥 Fan Crowd Dynamics:** {f['fan_crowd_dynamics']}
+                """)
                 
             with col2:
-                st.markdown("### ⚙️ Mitigation Directives")
+                st.markdown("### 👮 Mitigation Directives")
                 broker_out = json.loads(engine.broker_mitigation(payload))
                 
                 st.info(f"**🔀 Dynamic Traffic Rerouting:** {broker_out['dynamic_routing']}")
                 st.info(f"**👮 Security Resource Allocation:** {broker_out['staff_allocation']}")
                 st.error(f"📢 **Localized Public Safety Broadcast [{f['active_language'].upper()}]:** \"{broker_out['broadcast_msg']}\"")
+                
+                # Extra 🩺 indicator if healthcare resources or emergency directives are mentioned or implied
+                if score >= 40.0:
+                    st.warning("🩺 **Medical Staff Readiness:** Medical team alerted on standby at Gate access points due to elevated threat profile.")
 
 # Asynchronous Native Render Split mapping
 with tab_all:
