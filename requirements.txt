@@ -1,3 +1,6 @@
 # SentinAI-Pitch Requirements
 # Zero third-party dependencies are required for this engine.
 # Only standard library Python modules are used: dataclasses, json, typing, unittest.
+fastapi>=0.110.0
+uvicorn>=0.28.0
+streamlit>=1.35.0
