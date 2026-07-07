@@ -1,0 +1,3 @@
+# SentinAI-Pitch Requirements
+# Zero third-party dependencies are required for this engine.
+# Only standard library Python modules are used: dataclasses, json, typing, unittest.
