@@ -148,6 +148,19 @@ if selected_match != "All Matches":
 else:
     active_fixtures = data_fixtures
 
+# Accessible Text Search Box
+search_query = st.text_input(
+    label="🔍 Search and Filter Fixtures by Team, Stadium, or Stage:",
+    value="",
+    placeholder="e.g., Argentina, SoFi, Live..."
+).lower()
+
+if search_query:
+    active_fixtures = [
+        m for m in active_fixtures 
+        if search_query in m["match_name"].lower() or search_query in m["stadium"].lower() or search_query in m["stage"].lower()
+    ]
+
 # Native Interactive Tab Containers for full accessibility compliance
 tab_all, tab_past, tab_live, tab_upcoming = st.tabs([
     "🌎 All Tournaments", 
@@ -157,7 +170,7 @@ tab_all, tab_past, tab_live, tab_upcoming = st.tabs([
 ])
 
 def render_fixtures_grid(fixtures_list):
-    """Renders the screen split layout using 100% native structural elements inside expanders."""
+    """Renders self-contained match containers wrapping telemetry and decision outputs side-by-side inside expanders."""
     current_time = time.strftime("%H:%M:%S")
     st.subheader(f"⏱️ Operational Stream Loop Tracker | Current Cycle: {st.session_state.cycle_count:04d} | Sync: {current_time}")
     
@@ -171,7 +184,7 @@ def render_fixtures_grid(fixtures_list):
         city_name = city_mapping.get(f["stadium"], "New York")
         weather_str = get_live_weather(city_name)
         
-        # Clickable expander for each match incident
+        # Clickable expander for each individual match incident wrapping the split grid
         with st.expander(f"🏟️ {f['match_name']} ({f['stage']}) — Threat Score: {score:.1f}/100.0"):
             col1, col2 = st.columns(2)
             
@@ -199,13 +212,13 @@ def render_fixtures_grid(fixtures_list):
                     text=f"Turnstile Load Index: {pct:.1%} ({f['current_occupancy']} / {f['max_capacity']} Fans)"
                 )
                 
-                # Render 5 mandatory detail insights
+                # Render 5 mandatory detail insights as bullet points inside column 1
                 st.markdown("#### 📖 Operational Insights")
-                st.write(f"**🔄 Match Flow:** {f['match_flow']}")
-                st.write(f"**📊 Performance Analytics:** {f['performance_analytics']}")
-                st.write(f"**🎯 Tactical Conclusion:** {f['tactical_conclusion']}")
-                st.write(f"**🏗️ Stadium Infrastructure:** {f['stadium_infrastructure']}")
-                st.write(f"**👥 Fan Crowd Dynamics:** {f['fan_crowd_dynamics']}")
+                st.write(f"- **Match Flow:** {f['match_flow']}")
+                st.write(f"- **Performance Analytics:** {f['performance_analytics']}")
+                st.write(f"- **Tactical Conclusion:** {f['tactical_conclusion']}")
+                st.write(f"- **Stadium Infrastructure:** {f['stadium_infrastructure']}")
+                st.write(f"- **Fan Crowd Dynamics:** {f['fan_crowd_dynamics']}")
                 
             with col2:
                 st.markdown("### ⚙️ Mitigation Directives")
