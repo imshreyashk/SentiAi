@@ -4,8 +4,6 @@ import json
 import urllib.request
 import urllib.parse
 import ssl
-
-# Check that the import succeeds
 from stadium_engine import StadiumOperationsEngine, TelemetryPayload
 
 # Set official accessible browser parameters
@@ -19,7 +17,6 @@ st.set_page_config(
 # Render explicit, high-contrast native text configurations for the grading engine
 st.title("🏟️ FIFA 2026 · STADIUM COMMAND NETWORK · SENTINAI-PITCH")
 st.caption("Active Control Protocol | WCAG 2.1 Compliant Operational Intelligence Interface")
-st.markdown("---")
 
 # Track the engine cycles safely using session state to prevent thread blocking
 if "cycle_count" not in st.session_state:
@@ -115,6 +112,20 @@ data_fixtures = [
     }
 ]
 
+# Calculate Global Ecosystem Metrics
+total_gates = len(data_fixtures)
+total_occupancy = sum(f["current_occupancy"] for f in data_fixtures)
+total_capacity = sum(f["max_capacity"] for f in data_fixtures)
+
+# Ecosystem Metric Summary Bar
+es_col1, es_col2, es_col3, es_col4 = st.columns(4)
+es_col1.metric("Total Monitored Gates", total_gates)
+es_col2.metric("Combined Turnstile Load", f"{total_occupancy:,} Fans")
+es_col3.metric("Peak Safe Intake Capacity", f"{total_capacity:,} Fans")
+es_col4.metric("System Security Mode", "ACTIVE DEPLOYMENT")
+
+st.markdown("---")
+
 # Mapping of stadium names to search terms for wttr.in
 city_mapping = {
     "Seattle Stadium": "Seattle",
@@ -127,6 +138,7 @@ city_mapping = {
     "MetLife Stadium, NY/NJ": "New York"
 }
 
+@st.cache_data(ttl=600)
 def get_live_weather(city: str) -> str:
     """Fetches live weather safely using native runtime protocols and bypasses proxy blocks."""
     try:
