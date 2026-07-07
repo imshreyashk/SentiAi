@@ -18,6 +18,15 @@ st.set_page_config(
 st.title("🏟️ FIFA 2026 · STADIUM COMMAND NETWORK · SENTINAI-PITCH")
 st.caption("Active Control Protocol | WCAG 2.1 Compliant Operational Intelligence Interface")
 
+st.markdown("### 🌐 Tournament-Wide Operations Overview")
+m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+m_col1.metric(label="🏟️ Monitored Gates", value="8 Active Points")
+m_col2.metric(label="🎟️ Current Intake Volume", value="6,140 Fans")
+m_col3.metric(label="🛡️ Safe Target Capacity", value="8,000 Max")
+m_col4.metric(label="⚙️ Security Mode", value="ACTIVE DEPLOYMENT")
+st.markdown("---")
+
+
 # Track the engine cycles safely using session state to prevent thread blocking
 if "cycle_count" not in st.session_state:
     st.session_state.cycle_count = 1
