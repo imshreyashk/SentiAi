@@ -157,9 +157,11 @@ SCENARIOS = [
      "payload":{"gate_id":"MEX-S","current_occupancy":1000,"max_capacity":1000,"transit_status":"normal","crowd_temperament":"calm","active_language":"es"}},
 
     # ── LIVE ──────────────────────────────────────────────────────────────────
-    {"phase":"LIVE",     "label":"R16 · Atlanta · Argentina vs Egypt",          "result":"ONGOING — Kick-off 20:00 EST", "date":"JUL 07 2026", "mood_display":"Calm",
+    {"phase":"LIVE",     "label":"R16 · Mercedes-Benz Stadium Atlanta · Argentina vs Egypt",
+     "result":"PRE-MATCH GATES OPEN · Early Intake Flow",                       "date":"JUL 07 2026 · 12:41 EST", "mood_display":"Calm (Pre-match Intake)",
      "payload":{"gate_id":"ATL-W","current_occupancy":320,"max_capacity":1000,"transit_status":"normal","crowd_temperament":"calm","active_language":"en"}},
-    {"phase":"LIVE",     "label":"R16 · Vancouver · Switzerland vs Colombia",   "result":"ONGOING — Kick-off 22:00 EST", "date":"JUL 07 2026", "mood_display":"Anxious (Shuttle Delay)",
+    {"phase":"LIVE",     "label":"R16 · BC Place Vancouver · Switzerland vs Colombia",
+     "result":"MATCH-DAY CONGESTION · Peak Perimeter Volume",                   "date":"JUL 07 2026 · 12:41 EST", "mood_display":"Anxious (Shuttle Bottleneck)",
      "payload":{"gate_id":"VAN-A","current_occupancy":760,"max_capacity":1000,"transit_status":"delayed","crowd_temperament":"anxious","active_language":"fr"}},
 
     # ── UPCOMING ──────────────────────────────────────────────────────────────
@@ -209,137 +211,148 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Top control bar ────────────────────────────────────────────────────────────
-ctrl_l, ctrl_m, ctrl_r = st.columns([3, 1, 1])
-with ctrl_l:
-    query = st.text_input("", placeholder="🔍  Filter by team, stadium or gate ID…", label_visibility="collapsed")
-with ctrl_m:
-    st.metric("Total Fixtures", len(SCENARIOS))
-with ctrl_r:
-    live_cnt = sum(1 for s in SCENARIOS if s["phase"] == "LIVE")
-    st.metric("Live Now", live_cnt, delta="◉ Active", delta_color="normal")
+# ── Top metrics row ──────────────────────────────────────────────────────────
+m1, m2, m3, m4 = st.columns(4)
+live_cnt = sum(1 for s in SCENARIOS if s["phase"] == "LIVE")
+m1.metric("Total Fixtures", len(SCENARIOS))
+m2.metric("◉ Live Now",    live_cnt,                                  delta="Active",    delta_color="normal")
+m3.metric("⏪ Past",        sum(1 for s in SCENARIOS if s["phase"]=="PAST"),     delta="Completed", delta_color="off")
+m4.metric("◆ Upcoming",    sum(1 for s in SCENARIOS if s["phase"]=="UPCOMING"), delta="Scheduled", delta_color="off")
 
 st.markdown("---")
 
-# ── Filter ─────────────────────────────────────────────────────────────────────
-q = query.strip().lower()
-filtered = [s for s in SCENARIOS if not q or q in s["label"].lower() or q in s["payload"]["gate_id"].lower()]
+# ── Interactive Tabs ──────────────────────────────────────────────────────────
+tab_all, tab_past, tab_live, tab_upcoming = st.tabs(
+    ["🌎 All Fixtures", "⏪ Past Matches", "◉ Live Now", "◆ Upcoming Brackets"]
+)
 
-if not filtered:
-    st.warning(f"No fixtures match **\"{query}\"**. Try a team name, stadium, or gate ID.")
-    st.stop()
+TAB_FILTERS = {
+    "all":      lambda s: True,
+    "past":     lambda s: s["phase"] == "PAST",
+    "live":     lambda s: s["phase"] == "LIVE",
+    "upcoming": lambda s: s["phase"] == "UPCOMING",
+}
 
-# ── Phase summary pills ────────────────────────────────────────────────────────
-phase_counts = {}
-for s in filtered:
-    phase_counts[s["phase"]] = phase_counts.get(s["phase"], 0) + 1
+def render_dashboard(tab_key: str) -> None:
+    """Render the twin-column telemetry + mitigation layout for a given phase filter."""
+    active = [s for s in SCENARIOS if TAB_FILTERS[tab_key](s)]
+    if not active:
+        st.info("No fixtures in this category.")
+        return
 
-pill_html = ""
-pill_cls  = {"PAST":"tag-past","LIVE":"tag-live","UPCOMING":"tag-upcoming"}
-for ph, cnt in phase_counts.items():
-    pill_html += f'<span class="phase-tag {pill_cls.get(ph,"tag-past")}" style="margin-right:8px;">{PHASE_DISP[ph]} ({cnt})</span>'
-st.markdown(pill_html + "<br>", unsafe_allow_html=True)
+    # Phase summary pills
+    phase_counts: dict = {}
+    for s in active:
+        phase_counts[s["phase"]] = phase_counts.get(s["phase"], 0) + 1
+    pill_cls = {"PAST": "tag-past", "LIVE": "tag-live", "UPCOMING": "tag-upcoming"}
+    pill_html = "".join(
+        f'<span class="phase-tag {pill_cls.get(ph, "tag-past")}" style="margin-right:8px;">'
+        f'{PHASE_DISP[ph]} ({cnt})</span>'
+        for ph, cnt in phase_counts.items()
+    )
+    st.markdown(pill_html + "<br>", unsafe_allow_html=True)
 
-# ── Split Column Layout ────────────────────────────────────────────────────────
-col_tele, col_miti = st.columns(2, gap="large")
-
-with col_tele:
-    st.markdown('<div class="section-hdr hdr-tele">📡 &nbsp; LIVE TELEMETRY INCIDENTS</div>', unsafe_allow_html=True)
-
-with col_miti:
-    st.markdown('<div class="section-hdr hdr-miti">⚡ &nbsp; AUTOMATED COGNITIVE MITIGATION ACTIONS</div>', unsafe_allow_html=True)
-
-# ── Render each fixture ────────────────────────────────────────────────────────
-for sc in filtered:
-    payload, score, mitigation, error = process(sc)
-    phase      = sc["phase"]
-    tag_cls    = PHASE_TAG.get(phase, "tag-past")
-    phase_disp = PHASE_DISP.get(phase, phase)
-
-    # ── TELEMETRY CARD ─────────────────────────────────────────────────────────
+    col_tele, col_miti = st.columns(2, gap="large")
     with col_tele:
-        if error:
-            st.markdown(f"""
-            <div class="card card-high">
-              <span class="phase-tag {tag_cls}">{phase_disp}</span>
-              <div class="match-label">{sc['label']}</div>
-              <div class="result-text">{sc['date']} &nbsp;·&nbsp; {sc['result']}</div>
-              <div style="margin-top:12px; padding:10px; background:rgba(239,68,68,0.08); border-radius:6px; border:1px solid rgba(239,68,68,0.3);">
-                <span style="color:#ef4444; font-family:JetBrains Mono,monospace; font-size:0.75rem;">⚠ FAULT: {error}</span>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            lbl, css, hex_c, clr_cls, card_cls, _ = threat_meta(score)
-            occ_pct = payload.current_occupancy / payload.max_capacity
-            transit_color = {"normal":"#22c55e","delayed":"#facc15","blocked":"#ef4444"}.get(payload.transit_status,"#94a3b8")
-            mood_color    = {"calm":"#22c55e","anxious":"#facc15","angry":"#f97316","violent":"#ef4444"}.get(payload.crowd_temperament,"#94a3b8")
-
-            st.markdown(f"""
-            <div class="card {card_cls}">
-              <span class="phase-tag {tag_cls}">{phase_disp}</span>
-              <div class="match-label">{sc['label']}</div>
-              <div class="result-text">{sc['date']} &nbsp;·&nbsp; {sc['result']}</div>
-              <div class="metric-row">
-                <div class="metric-box">
-                  <div class="metric-lbl">Threat Score</div>
-                  <div class="metric-val {clr_cls}">{score:.1f}<span style="font-size:0.65rem;color:#64748b;">/100</span></div>
-                </div>
-                <div class="metric-box">
-                  <div class="metric-lbl">Threat Level</div>
-                  <div class="metric-val {clr_cls}">{lbl}</div>
-                </div>
-                <div class="metric-box">
-                  <div class="metric-lbl">Gate ID</div>
-                  <div class="metric-val clr-gray" style="font-family:JetBrains Mono,monospace;font-size:0.9rem;">{payload.gate_id}</div>
-                </div>
-              </div>
-              <div style="font-size:0.7rem;color:#64748b;margin-bottom:4px;">Occupancy &nbsp; {int(occ_pct*100)}% &nbsp; ({payload.current_occupancy:,}/{payload.max_capacity:,})</div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.progress(min(occ_pct, 1.0))
-            st.markdown(f"""
-            <div style="display:flex;gap:16px;margin-bottom:16px;font-size:0.78rem;">
-              <span>🚌 <span style="color:{transit_color};font-weight:600;">{payload.transit_status.upper()}</span></span>
-              <span>😤 <span style="color:{mood_color};font-weight:600;">{sc['mood_display']}</span></span>
-              <span>🌐 <span style="color:#818cf8;font-weight:600;">{payload.active_language.upper()}</span></span>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # ── MITIGATION CARD ────────────────────────────────────────────────────────
+        st.markdown('<div class="section-hdr hdr-tele">📡 &nbsp; LIVE TELEMETRY INCIDENTS</div>',         unsafe_allow_html=True)
     with col_miti:
-        if error:
-            st.markdown(f"""
-            <div class="mcard mcard-fault" style="border-left-color:#f97316;">
-              <span class="phase-tag tag-fault">{phase_disp}</span>
-              <div class="match-label" style="color:#f97316;margin-top:8px;">⚠ FAULT INTERCEPT ACTIVE</div>
-              <div class="action-row"><span class="action-lbl" style="color:#f97316;">▶ STATUS &nbsp;&nbsp;&nbsp;</span><span class="action-val">Pipeline caught corrupted telemetry packet safely.</span></div>
-              <div class="action-row"><span class="action-lbl" style="color:#f97316;">▶ ACTION &nbsp;&nbsp;&nbsp;</span><span class="action-val">Packet discarded. Sensor reset queued.</span></div>
-              <div class="action-row"><span class="action-lbl" style="color:#f97316;">▶ BROADCAST</span><span class="broadcast-text"> "Control room standby. Signal integrity check in progress."</span></div>
-            </div>
-            <div style="height:46px;"></div>
-            """, unsafe_allow_html=True)
-        else:
-            _, css, _, _, _, mcard_cls = threat_meta(score)
-            st.markdown(f"""
-            <div class="{mcard_cls}">
-              <span class="phase-tag {tag_cls}">{phase_disp}</span>
-              <div class="match-label" style="margin-top:8px;">Gate {payload.gate_id} — Mitigation Issued</div>
-              <div class="action-row">
-                <div><span class="action-lbl lbl-route">▶ DYNAMIC ROUTING &nbsp;&nbsp;</span></div>
-                <div class="action-val" style="padding-left:4px;">{mitigation['dynamic_routing']}</div>
-              </div>
-              <div class="action-row" style="margin-top:8px;">
-                <div><span class="action-lbl lbl-staff">▶ STAFF ALLOCATION &nbsp;</span></div>
-                <div class="action-val" style="padding-left:4px;">{mitigation['staff_allocation']}</div>
-              </div>
-              <div class="action-row" style="margin-top:8px;">
-                <div><span class="action-lbl lbl-bcast">▶ FAN BROADCAST &nbsp;&nbsp;&nbsp;&nbsp;</span></div>
-                <div class="broadcast-text" style="padding-left:4px;">"{mitigation['broadcast_msg']}"</div>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-hdr hdr-miti">⚡ &nbsp; AUTOMATED COGNITIVE MITIGATION ACTIONS</div>', unsafe_allow_html=True)
+
+    for sc in active:
+        payload, score, mitigation, error = process(sc)
+        phase      = sc["phase"]
+        tag_cls    = PHASE_TAG.get(phase, "tag-past")
+        phase_disp = PHASE_DISP.get(phase, phase)
+
+        # ── TELEMETRY CARD ─────────────────────────────────────────────────────
+        with col_tele:
+            if error:
+                st.markdown(f"""
+                <div class="card card-high">
+                  <span class="phase-tag {tag_cls}">{phase_disp}</span>
+                  <div class="match-label">{sc['label']}</div>
+                  <div class="result-text">{sc['date']} &nbsp;·&nbsp; {sc['result']}</div>
+                  <div style="margin-top:12px;padding:10px;background:rgba(239,68,68,0.08);border-radius:6px;border:1px solid rgba(239,68,68,0.3);">
+                    <span style="color:#ef4444;font-family:JetBrains Mono,monospace;font-size:0.75rem;">⚠ FAULT: {error}</span>
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                lbl, css, hex_c, clr_cls, card_cls, _ = threat_meta(score)
+                occ_pct       = payload.current_occupancy / payload.max_capacity
+                transit_color = {"normal":"#22c55e","delayed":"#facc15","blocked":"#ef4444"}.get(payload.transit_status, "#94a3b8")
+                mood_color    = {"calm":"#22c55e","anxious":"#facc15","angry":"#f97316","violent":"#ef4444"}.get(payload.crowd_temperament, "#94a3b8")
+                st.markdown(f"""
+                <div class="card {card_cls}">
+                  <span class="phase-tag {tag_cls}">{phase_disp}</span>
+                  <div class="match-label">{sc['label']}</div>
+                  <div class="result-text">{sc['date']} &nbsp;·&nbsp; {sc['result']}</div>
+                  <div class="metric-row">
+                    <div class="metric-box">
+                      <div class="metric-lbl">Threat Score</div>
+                      <div class="metric-val {clr_cls}">{score:.1f}<span style="font-size:0.65rem;color:#64748b;">/100</span></div>
+                    </div>
+                    <div class="metric-box">
+                      <div class="metric-lbl">Threat Level</div>
+                      <div class="metric-val {clr_cls}">{lbl}</div>
+                    </div>
+                    <div class="metric-box">
+                      <div class="metric-lbl">Gate ID</div>
+                      <div class="metric-val clr-gray" style="font-family:JetBrains Mono,monospace;font-size:0.9rem;">{payload.gate_id}</div>
+                    </div>
+                  </div>
+                  <div style="font-size:0.7rem;color:#64748b;margin-bottom:4px;">Occupancy &nbsp; {int(occ_pct*100)}% &nbsp; ({payload.current_occupancy:,}/{payload.max_capacity:,})</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.progress(min(occ_pct, 1.0))
+                st.markdown(f"""
+                <div style="display:flex;gap:16px;margin-bottom:16px;font-size:0.78rem;">
+                  <span>🚌 <span style="color:{transit_color};font-weight:600;">{payload.transit_status.upper()}</span></span>
+                  <span>😤 <span style="color:{mood_color};font-weight:600;">{sc['mood_display']}</span></span>
+                  <span>🌐 <span style="color:#818cf8;font-weight:600;">{payload.active_language.upper()}</span></span>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # ── MITIGATION CARD ────────────────────────────────────────────────────
+        with col_miti:
+            if error:
+                st.markdown(f"""
+                <div class="mcard mcard-fault" style="border-left-color:#f97316;">
+                  <span class="phase-tag tag-fault">{phase_disp}</span>
+                  <div class="match-label" style="color:#f97316;margin-top:8px;">⚠ FAULT INTERCEPT ACTIVE</div>
+                  <div class="action-row"><span class="action-lbl" style="color:#f97316;">▶ STATUS &nbsp;&nbsp;&nbsp;</span><span class="action-val">Pipeline caught corrupted telemetry packet safely.</span></div>
+                  <div class="action-row"><span class="action-lbl" style="color:#f97316;">▶ ACTION &nbsp;&nbsp;&nbsp;</span><span class="action-val">Packet discarded. Sensor reset queued.</span></div>
+                  <div class="action-row"><span class="action-lbl" style="color:#f97316;">▶ BROADCAST</span><span class="broadcast-text"> "Control room standby. Signal integrity check in progress."</span></div>
+                </div>
+                <div style="height:46px;"></div>
+                """, unsafe_allow_html=True)
+            else:
+                _, css, _, _, _, mcard_cls = threat_meta(score)
+                st.markdown(f"""
+                <div class="{mcard_cls}">
+                  <span class="phase-tag {tag_cls}">{phase_disp}</span>
+                  <div class="match-label" style="margin-top:8px;">Gate {payload.gate_id} — Mitigation Issued</div>
+                  <div class="action-row">
+                    <div><span class="action-lbl lbl-route">▶ DYNAMIC ROUTING &nbsp;&nbsp;</span></div>
+                    <div class="action-val" style="padding-left:4px;">{mitigation['dynamic_routing']}</div>
+                  </div>
+                  <div class="action-row" style="margin-top:8px;">
+                    <div><span class="action-lbl lbl-staff">▶ STAFF ALLOCATION &nbsp;</span></div>
+                    <div class="action-val" style="padding-left:4px;">{mitigation['staff_allocation']}</div>
+                  </div>
+                  <div class="action-row" style="margin-top:8px;">
+                    <div><span class="action-lbl lbl-bcast">▶ FAN BROADCAST &nbsp;&nbsp;&nbsp;&nbsp;</span></div>
+                    <div class="broadcast-text" style="padding-left:4px;">"{mitigation['broadcast_msg']}"</div>
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
+
+# ── Dispatch tabs ─────────────────────────────────────────────────────────────
+with tab_all:      render_dashboard("all")
+with tab_past:     render_dashboard("past")
+with tab_live:     render_dashboard("live")
+with tab_upcoming: render_dashboard("upcoming")
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
