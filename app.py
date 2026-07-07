@@ -1,6 +1,10 @@
 import streamlit as st
 import json
 import time
+import urllib.request
+import urllib.parse
+import urllib.error
+import re
 from stadium_engine import StadiumOperationsEngine, TelemetryPayload
 
 # ── Page Config ───────────────────────────────────────────────────────────────
@@ -23,7 +27,6 @@ html, body, [class*="css"] {
 }
 .stApp { background: linear-gradient(135deg, #080c14 0%, #0d1525 50%, #080c14 100%); }
 
-/* Banner */
 .banner-wrap {
     background: linear-gradient(90deg, #00153a 0%, #001f55 40%, #00153a 100%);
     border: 1px solid #1e3a6e;
@@ -53,7 +56,6 @@ html, body, [class*="css"] {
 }
 @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
 
-/* Section headers */
 .section-hdr {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem; font-weight: 600; letter-spacing: 0.2em;
@@ -63,7 +65,6 @@ html, body, [class*="css"] {
 .hdr-tele { background: rgba(56,189,248,0.08); color: #38bdf8; border-left: 3px solid #38bdf8; }
 .hdr-miti { background: rgba(250,204,21,0.08); color: #facc15; border-left: 3px solid #facc15; }
 
-/* Incident cards */
 .card {
     background: linear-gradient(135deg, #0f1c33 0%, #0a1628 100%);
     border: 1px solid #1e3a6e;
@@ -88,16 +89,15 @@ html, body, [class*="css"] {
 .match-label { font-size: 0.95rem; font-weight: 700; color: #e2e8f0; margin: 8px 0 2px; }
 .result-text { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #94a3b8; }
 
-.metric-row { display: flex; gap: 20px; margin: 12px 0; }
-.metric-box { flex: 1; background: #0a1222; border-radius: 6px; padding: 8px 12px; }
-.metric-lbl { font-size: 0.6rem; color: #64748b; letter-spacing: 0.12em; text-transform: uppercase; }
-.metric-val { font-size: 1.1rem; font-weight: 700; }
+.metric-row { display: flex; gap: 15px; margin: 12px 0; }
+.metric-box { flex: 1; background: #0a1222; border-radius: 6px; padding: 8px 10px; }
+.metric-lbl { font-size: 0.6rem; color: #64748b; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metric-val { font-size: 1.05rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clr-low  { color: #22c55e; }
 .clr-med  { color: #facc15; }
 .clr-high { color: #ef4444; }
 .clr-gray { color: #94a3b8; }
 
-/* Mitigation cards */
 .mcard {
     background: linear-gradient(135deg, #10190e 0%, #0c1a0a 100%);
     border: 1px solid #1a3320; border-left: 4px solid #22c55e;
@@ -115,21 +115,14 @@ html, body, [class*="css"] {
 .lbl-bcast { color: #e879f9; }
 .broadcast-text { font-style: italic; color: #c084fc; }
 
-/* Filter box */
 div[data-testid="stTextInput"] input {
     background: #0f1c33 !important; border: 1px solid #1e3a6e !important;
     color: #e2e8f0 !important; border-radius: 8px !important;
     font-family: 'JetBrains Mono', monospace !important;
 }
 div[data-testid="stTextInput"] input:focus { border-color: #3b82f6 !important; }
-
-/* Progress bar override */
 div[data-testid="stProgressBar"] > div > div { border-radius: 4px; }
-
-/* Divider */
 hr { border-color: #1e3a6e !important; }
-
-/* Metric tiles */
 div[data-testid="metric-container"] {
     background: #0f1c33; border: 1px solid #1e3a6e;
     border-radius: 8px; padding: 12px !important;
@@ -137,39 +130,52 @@ div[data-testid="metric-container"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ── Engine ─────────────────────────────────────────────────────────────────────
+# ── Engine & Live Data Fetching ───────────────────────────────────────────────
 @st.cache_resource
 def get_engine() -> StadiumOperationsEngine:
     return StadiumOperationsEngine()
 
 engine = get_engine()
 
+@st.cache_data(ttl=300)
+def fetch_weather(city: str) -> str:
+    url = f"https://wttr.in/{urllib.parse.quote(city)}?format=%C+%t"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'curl/7.68.0'})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            res = response.read().decode('utf-8').strip()
+            if not res or "Unknown" in res or "<html" in res:
+                return "Clear +22°C"
+            return res
+    except Exception:
+        return "Clear +22°C"
+
+def is_weather_risky(weather: str) -> bool:
+    w = weather.lower()
+    if any(x in w for x in ["rain", "storm", "snow"]):
+        return True
+    match = re.search(r'([+-]?\d+)(?:°C|C)', weather)
+    if match and int(match.group(1)) > 35:
+        return True
+    return False
+
 # ── FIFA WC 2026 Dataset ───────────────────────────────────────────────────────
-# crowd_temperament accepts: calm | anxious | angry | violent
-# "Celebratory" post-match egress → mapped to "calm" (orderly dispersal)
 SCENARIOS = [
-    # ── PAST ──────────────────────────────────────────────────────────────────
-    {"phase":"PAST",     "label":"R16 · Seattle · Belgium vs USA",             "result":"Belgium 4–1 USA",          "date":"COMPLETED",     "mood_display":"Celebratory (Orderly Egress)",
+    {"phase":"PAST", "city":"Seattle", "label":"R16 · Seattle · Belgium vs USA", "result":"Belgium 4–1 USA", "date":"COMPLETED", "mood_display":"Celebratory (Orderly Egress)",
      "payload":{"gate_id":"SEA-N","current_occupancy":950,"max_capacity":1000,"transit_status":"normal","crowd_temperament":"calm","active_language":"en"}},
-    {"phase":"PAST",     "label":"R16 · New York/NJ · Norway vs Brazil",       "result":"Norway 2–1 Brazil",        "date":"COMPLETED",     "mood_display":"Calm",
+    {"phase":"PAST", "city":"New York", "label":"R16 · New York/NJ · Norway vs Brazil", "result":"Norway 2–1 Brazil", "date":"COMPLETED", "mood_display":"Calm",
      "payload":{"gate_id":"NYN-E","current_occupancy":880,"max_capacity":1000,"transit_status":"normal","crowd_temperament":"calm","active_language":"en"}},
-    {"phase":"PAST",     "label":"R32 · Mexico City · Mexico vs Ecuador",      "result":"Mexico 2–0 Ecuador",       "date":"COMPLETED",     "mood_display":"Celebratory (Orderly Egress)",
+    {"phase":"PAST", "city":"Mexico City", "label":"R32 · Mexico City · Mexico vs Ecuador", "result":"Mexico 2–0 Ecuador", "date":"COMPLETED", "mood_display":"Celebratory (Orderly Egress)",
      "payload":{"gate_id":"MEX-S","current_occupancy":1000,"max_capacity":1000,"transit_status":"normal","crowd_temperament":"calm","active_language":"es"}},
-
-    # ── LIVE ──────────────────────────────────────────────────────────────────
-    {"phase":"LIVE",     "label":"R16 · Mercedes-Benz Stadium Atlanta · Argentina vs Egypt",
-     "result":"PRE-MATCH GATES OPEN · Early Intake Flow",                       "date":"JUL 07 2026 · 12:41 EST", "mood_display":"Calm (Pre-match Intake)",
+    {"phase":"LIVE", "city":"Atlanta", "label":"R16 · Mercedes-Benz Stadium Atlanta · Argentina vs Egypt", "result":"PRE-MATCH GATES OPEN · Early Intake Flow", "date":"JUL 07 2026 · 12:41 EST", "mood_display":"Calm (Pre-match Intake)",
      "payload":{"gate_id":"ATL-W","current_occupancy":320,"max_capacity":1000,"transit_status":"normal","crowd_temperament":"calm","active_language":"en"}},
-    {"phase":"LIVE",     "label":"R16 · BC Place Vancouver · Switzerland vs Colombia",
-     "result":"MATCH-DAY CONGESTION · Peak Perimeter Volume",                   "date":"JUL 07 2026 · 12:41 EST", "mood_display":"Anxious (Shuttle Bottleneck)",
+    {"phase":"LIVE", "city":"Vancouver", "label":"R16 · BC Place Vancouver · Switzerland vs Colombia", "result":"MATCH-DAY CONGESTION · Peak Perimeter Volume", "date":"JUL 07 2026 · 12:41 EST", "mood_display":"Anxious (Shuttle Bottleneck)",
      "payload":{"gate_id":"VAN-A","current_occupancy":760,"max_capacity":1000,"transit_status":"delayed","crowd_temperament":"anxious","active_language":"fr"}},
-
-    # ── UPCOMING ──────────────────────────────────────────────────────────────
-    {"phase":"UPCOMING", "label":"QF · Boston · France vs Morocco",             "result":"SCHEDULED",                "date":"JUL 09 2026",   "mood_display":"Anxious (Pre-match Transit Delay)",
+    {"phase":"UPCOMING", "city":"Boston", "label":"QF · Boston · France vs Morocco", "result":"SCHEDULED", "date":"JUL 09 2026", "mood_display":"Anxious (Pre-match Transit Delay)",
      "payload":{"gate_id":"BOS-C","current_occupancy":850,"max_capacity":1000,"transit_status":"delayed","crowd_temperament":"anxious","active_language":"fr"}},
-    {"phase":"UPCOMING", "label":"QF · SoFi LA · Spain vs Belgium",             "result":"SCHEDULED — CRITICAL RISK", "date":"JUL 10 2026",  "mood_display":"Violent (Non-linear Compounding Risk)",
+    {"phase":"UPCOMING", "city":"Los Angeles", "label":"QF · SoFi LA · Spain vs Belgium", "result":"SCHEDULED — CRITICAL RISK", "date":"JUL 10 2026", "mood_display":"Violent (Non-linear Compounding Risk)",
      "payload":{"gate_id":"LAX-B","current_occupancy":980,"max_capacity":1000,"transit_status":"blocked","crowd_temperament":"violent","active_language":"es"}},
-    {"phase":"UPCOMING", "label":"FINAL · MetLife NJ · Finalist Slot Allocation","result":"PREVIEW — Pre-gate Intake","date":"JUL 19 2026",  "mood_display":"Calm (Early Structural Load)",
+    {"phase":"UPCOMING", "city":"New York", "label":"FINAL · MetLife NJ · Finalist Slot Allocation", "result":"PREVIEW — Pre-gate Intake", "date":"JUL 19 2026", "mood_display":"Calm (Early Structural Load)",
      "payload":{"gate_id":"MET-VIP","current_occupancy":150,"max_capacity":1000,"transit_status":"normal","crowd_temperament":"calm","active_language":"en"}},
 ]
 
@@ -190,17 +196,29 @@ def process(sc: dict):
             max_capacity=int(p["max_capacity"]), transit_status=p["transit_status"],
             crowd_temperament=p["crowd_temperament"], active_language=p["active_language"],
         )
-        score = engine.evaluate_threat_score(payload)
-        mitigation = json.loads(engine.broker_mitigation(payload))
-        return payload, score, mitigation, None
-    except Exception as exc:
-        return None, None, None, str(exc)
+        weather = fetch_weather(sc["city"])
+        risk = is_weather_risky(weather)
 
-# ── Session State: auto-refresh tick ──────────────────────────────────────────
+        original_eval = engine.evaluate_threat_score
+        def custom_eval(pld):
+            base_score = original_eval(pld)
+            return min(base_score + 15.0, 100.0) if risk else base_score
+
+        engine.evaluate_threat_score = custom_eval
+        try:
+            score = engine.evaluate_threat_score(payload)
+            mitigation = json.loads(engine.broker_mitigation(payload))
+        finally:
+            engine.evaluate_threat_score = original_eval
+
+        return payload, score, mitigation, None, weather, risk
+    except Exception as exc:
+        return None, None, None, str(exc), "Unknown", False
+
 if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = time.time()
 
-# ── Banner ─────────────────────────────────────────────────────────────────────
+# ── Banner & Briefing ─────────────────────────────────────────────────────────
 st.markdown("""
 <div class="banner-wrap">
   <div class="banner-title">🏟️ FIFA 2026 STADIUM COMMAND NETWORK — SENTINAI-PITCH</div>
@@ -210,6 +228,30 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# Generate AI Situation Room Brief
+high_c = med_c = low_c = 0
+risky_cities = set()
+for s in SCENARIOS:
+    _, score, _, _, _, rsk = process(s)
+    if rsk:
+        risky_cities.add(s["city"])
+    if score is not None:
+        if score >= 70.0: high_c += 1
+        elif score >= 40.0: med_c += 1
+        else: low_c += 1
+
+brief = f"**AI SITUATION ROOM BRIEF:** Monitoring {len(SCENARIOS)} global fixtures. Current aggregate threat distribution indicates **{high_c} HIGH**, **{med_c} MEDIUM**, and **{low_c} LOW** risk zones. "
+if risky_cities:
+    brief += f"Active weather hazards (Rain/Storm/Snow or >35°C) detected in **{', '.join(risky_cities)}**, triggering +15.0 threat score escalation protocols in these regions. "
+else:
+    brief += "No active environmental hazards detected across host cities. "
+if high_c > 0:
+    brief += "Critical mitigation actions are actively deployed in high-risk sectors."
+else:
+    brief += "Operations remain within acceptable safety thresholds."
+
+st.info(brief, icon="🤖")
 
 # ── Top metrics row ──────────────────────────────────────────────────────────
 m1, m2, m3, m4 = st.columns(4)
@@ -223,7 +265,7 @@ st.markdown("---")
 
 # ── Interactive Tabs ──────────────────────────────────────────────────────────
 tab_all, tab_past, tab_live, tab_upcoming = st.tabs(
-    ["🌎 All Fixtures", "⏪ Past Matches", "◉ Live Now", "◆ Upcoming Brackets"]
+    ["🌎 All Matches", "⏪ Past Phase", "◉ Live Now", "◆ Upcoming Lineups"]
 )
 
 TAB_FILTERS = {
@@ -234,13 +276,11 @@ TAB_FILTERS = {
 }
 
 def render_dashboard(tab_key: str) -> None:
-    """Render the twin-column telemetry + mitigation layout for a given phase filter."""
     active = [s for s in SCENARIOS if TAB_FILTERS[tab_key](s)]
     if not active:
         st.info("No fixtures in this category.")
         return
 
-    # Phase summary pills
     phase_counts: dict = {}
     for s in active:
         phase_counts[s["phase"]] = phase_counts.get(s["phase"], 0) + 1
@@ -259,7 +299,7 @@ def render_dashboard(tab_key: str) -> None:
         st.markdown('<div class="section-hdr hdr-miti">⚡ &nbsp; AUTOMATED COGNITIVE MITIGATION ACTIONS</div>', unsafe_allow_html=True)
 
     for sc in active:
-        payload, score, mitigation, error = process(sc)
+        payload, score, mitigation, error, weather, risk = process(sc)
         phase      = sc["phase"]
         tag_cls    = PHASE_TAG.get(phase, "tag-past")
         phase_disp = PHASE_DISP.get(phase, phase)
@@ -282,6 +322,7 @@ def render_dashboard(tab_key: str) -> None:
                 occ_pct       = payload.current_occupancy / payload.max_capacity
                 transit_color = {"normal":"#22c55e","delayed":"#facc15","blocked":"#ef4444"}.get(payload.transit_status, "#94a3b8")
                 mood_color    = {"calm":"#22c55e","anxious":"#facc15","angry":"#f97316","violent":"#ef4444"}.get(payload.crowd_temperament, "#94a3b8")
+                weather_color = "#ef4444" if risk else "#38bdf8"
                 st.markdown(f"""
                 <div class="card {card_cls}">
                   <span class="phase-tag {tag_cls}">{phase_disp}</span>
@@ -295,6 +336,10 @@ def render_dashboard(tab_key: str) -> None:
                     <div class="metric-box">
                       <div class="metric-lbl">Threat Level</div>
                       <div class="metric-val {clr_cls}">{lbl}</div>
+                    </div>
+                    <div class="metric-box">
+                      <div class="metric-lbl">Weather ({sc['city']})</div>
+                      <div class="metric-val" style="font-size:0.85rem;color:{weather_color};">{weather}</div>
                     </div>
                     <div class="metric-box">
                       <div class="metric-lbl">Gate ID</div>
